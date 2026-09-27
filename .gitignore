@@ -1,0 +1,4 @@
+/target
+bridge/apple_translate_bridge
+**/*.rs.bk
+.DS_Store
