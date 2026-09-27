@@ -3,6 +3,8 @@
 [![macOS 26+](https://img.shields.io/badge/macOS-26+-blue.svg)](https://www.apple.com/macos/)
 [![Rust 2021](https://img.shields.io/badge/rust-edition%202021-orange.svg)](Cargo.toml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![GitHub Pages](https://img.shields.io/badge/docs-GitHub%20Pages-blue.svg)](https://bhubbard.github.io/translate-rs/)
+[![Coverage Report](https://img.shields.io/badge/coverage-HTML%20Report-brightgreen.svg)](https://bhubbard.github.io/translate-rs/)
 [![On-device](https://img.shields.io/badge/translation-on--device-purple.svg)](#why-on-device)
 
 **A high-performance, deterministic, on-device translator for macOS ported to native Rust.**  
