@@ -33,7 +33,7 @@ jobs:
 
       - name: Generate Coverage Report
         run: |
-          cargo llvm-cov --html --output-dir ./coverage_report --lcov --output-path ./coverage_report/lcov.info
+          cargo llvm-cov --html --output-dir ./coverage_report
 
       - name: Upload Pages Artifact
         if: github.ref == 'refs/heads/main'
