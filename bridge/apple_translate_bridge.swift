@@ -2,7 +2,7 @@ import Foundation
 import Translation
 import NaturalLanguage
 
-@available(macOS 26.0, *)
+@available(macOS 15.0, *)
 @main
 struct AppleTranslateBridgeMain {
     static func main() async {

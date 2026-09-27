@@ -95,7 +95,7 @@ async fn test_server_endpoints() {
     let resp = client
         .post(format!("http://{addr}/detect"))
         .json(&serde_json::json!({
-            "q": "Bonjour mon ami"
+            "q": "Bonjour tout le monde, comment allez-vous aujourd'hui?"
         }))
         .send()
         .await

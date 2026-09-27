@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   coverage:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -39,7 +39,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./coverage_report
+          path: ./coverage_report/html
 
   deploy-pages:
     if: github.ref == 'refs/heads/main'
