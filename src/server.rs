@@ -21,14 +21,16 @@ pub struct ServerState {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct DeepLParams {
-    pub text: Option<serde_json::Value>,
+    pub text: Vec<String>,
     pub target_lang: Option<String>,
     pub source_lang: Option<String>,
+    pub auth_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
 pub struct LibreParams {
-    pub q: Option<serde_json::Value>,
+    pub q: Vec<String>,
+    pub q_was_array: bool,
     pub source: Option<String>,
     pub target: Option<String>,
     pub format: Option<String>,
@@ -37,7 +39,7 @@ pub struct LibreParams {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct GoogleParams {
-    pub q: Option<serde_json::Value>,
+    pub qs: Vec<String>,
     pub target: Option<String>,
     pub source: Option<String>,
     pub key: Option<String>,
@@ -78,13 +80,22 @@ pub fn create_router(state: Arc<ServerState>) -> Router {
         .with_state(state)
 }
 
-fn check_auth(state: &ServerState, headers: &HeaderMap, query_key: Option<&str>) -> bool {
+fn check_auth(state: &ServerState, headers: &HeaderMap, query_or_body_key: Option<&str>) -> bool {
     let Some(ref expected) = state.api_key else {
         return true;
     };
 
     if let Some(auth) = headers.get("authorization").and_then(|h| h.to_str().ok()) {
-        if auth.trim_start_matches("Bearer ").trim() == expected {
+        let trimmed = auth.trim();
+        if let Some(rest) = trimmed.strip_prefix("DeepL-Auth-Key ") {
+            if rest.trim() == expected {
+                return true;
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("Bearer ") {
+            if rest.trim() == expected {
+                return true;
+            }
+        } else if trimmed == expected {
             return true;
         }
     }
@@ -101,7 +112,7 @@ fn check_auth(state: &ServerState, headers: &HeaderMap, query_key: Option<&str>)
         }
     }
 
-    if let Some(key) = query_key {
+    if let Some(key) = query_or_body_key {
         if key == expected {
             return true;
         }
@@ -134,14 +145,15 @@ async fn deepl_translate_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if !check_auth(&state, &headers, None) {
+    let params = parse_deepl_request(&headers, &body);
+
+    if !check_auth(&state, &headers, params.auth_key.as_deref()) {
         return json_response(
             StatusCode::FORBIDDEN,
             serde_json::json!({ "message": "Invalid API key" }),
         );
     }
 
-    let params: DeepLParams = parse_json_or_form(&headers, &body);
     let Some(target) = params.target_lang else {
         return json_response(
             StatusCode::BAD_REQUEST,
@@ -149,15 +161,14 @@ async fn deepl_translate_handler(
         );
     };
 
-    let texts = extract_strings(params.text);
-    if texts.is_empty() {
+    if params.text.is_empty() {
         return json_response(
             StatusCode::BAD_REQUEST,
             serde_json::json!({ "message": "Missing 'text' parameter" }),
         );
     }
 
-    let joined = texts.join("\n");
+    let joined = params.text.join("\n");
     let detector = LanguageDetector::new(&[]);
     let detection = match params.source_lang {
         Some(s) if !s.is_empty() => crate::types::DetectionResult {
@@ -173,14 +184,16 @@ async fn deepl_translate_handler(
     let src = normalize_language_code(&detection.language_code);
     let dst = normalize_language_code(&target);
 
-    match state.translator.translate(&texts, &src, &dst, true).await {
+    match state.translator.translate(&params.text, &src, &dst, true).await {
         Ok(translated) => {
             let translations: Vec<serde_json::Value> = translated
                 .into_iter()
                 .map(|text| {
+                    let billed = text.chars().count();
                     serde_json::json!({
                         "detected_source_language": src.to_uppercase(),
-                        "text": text
+                        "text": text,
+                        "billed_characters": billed
                     })
                 })
                 .collect();
@@ -197,7 +210,7 @@ async fn deepl_translate_handler(
     }
 }
 
-async fn deepl_languages_handler() -> Response {
+async fn deepl_languages_handler(Query(_query): Query<HashMap<String, String>>) -> Response {
     let languages: Vec<serde_json::Value> = SUPPORTED_LANGUAGES
         .iter()
         .map(|(code, name)| {
@@ -218,7 +231,7 @@ async fn libre_translate_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let params: LibreParams = parse_json_or_form(&headers, &body);
+    let params = parse_libre_request(&headers, &body);
 
     if !check_auth(&state, &headers, params.api_key.as_deref()) {
         return json_response(
@@ -234,16 +247,14 @@ async fn libre_translate_handler(
         );
     };
 
-    let is_array = matches!(params.q, Some(serde_json::Value::Array(_)));
-    let texts = extract_strings(params.q);
-    if texts.is_empty() {
+    if params.q.is_empty() {
         return json_response(
             StatusCode::BAD_REQUEST,
             serde_json::json!({ "error": "Missing 'q' parameter" }),
         );
     }
 
-    let joined = texts.join("\n");
+    let joined = params.q.join("\n");
     let detector = LanguageDetector::new(&[]);
     let detection = match params.source.as_deref() {
         Some(s) if !s.is_empty() && s != "auto" => crate::types::DetectionResult {
@@ -259,9 +270,9 @@ async fn libre_translate_handler(
     let src = normalize_language_code(&detection.language_code);
     let dst = normalize_language_code(&target);
 
-    match state.translator.translate(&texts, &src, &dst, true).await {
+    match state.translator.translate(&params.q, &src, &dst, true).await {
         Ok(translated) => {
-            if is_array {
+            if params.q_was_array {
                 json_response(
                     StatusCode::OK,
                     serde_json::json!({ "translatedText": translated }),
@@ -288,9 +299,8 @@ async fn libre_translate_handler(
 }
 
 async fn libre_detect_handler(headers: HeaderMap, body: Bytes) -> Response {
-    let params: LibreParams = parse_json_or_form(&headers, &body);
-    let texts = extract_strings(params.q);
-    let joined = texts.join("\n");
+    let params = parse_libre_request(&headers, &body);
+    let joined = params.q.join("\n");
 
     let detector = LanguageDetector::new(&[]);
     let detection = detector.detect(&joined).unwrap_or(crate::types::DetectionResult {
@@ -355,10 +365,10 @@ async fn google_translate_get_handler(
 ) -> Response {
     let target = query.get("target").cloned();
     let source = query.get("source").cloned();
-    let q = query.get("q").cloned().map(serde_json::Value::String);
+    let qs: Vec<String> = query.get("q").into_iter().cloned().collect();
     let key = query.get("key").cloned();
 
-    handle_google_translate(state, headers, key.as_deref(), target, source, q).await
+    handle_google_translate(state, headers, key.as_deref(), target, source, qs).await
 }
 
 async fn google_translate_post_handler(
@@ -366,14 +376,14 @@ async fn google_translate_post_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let params: GoogleParams = parse_json_or_form(&headers, &body);
+    let params = parse_google_request(&headers, &body);
     handle_google_translate(
         state,
         headers,
         params.key.as_deref(),
         params.target,
         params.source,
-        params.q,
+        params.qs,
     )
     .await
 }
@@ -384,7 +394,7 @@ async fn handle_google_translate(
     key: Option<&str>,
     target: Option<String>,
     source: Option<String>,
-    q: Option<serde_json::Value>,
+    qs: Vec<String>,
 ) -> Response {
     if !check_auth(&state, &headers, key) {
         return google_error(StatusCode::UNAUTHORIZED, "Invalid API key");
@@ -394,12 +404,11 @@ async fn handle_google_translate(
         return google_error(StatusCode::BAD_REQUEST, "Missing 'target' parameter");
     };
 
-    let texts = extract_strings(q);
-    if texts.is_empty() {
+    if qs.is_empty() {
         return google_error(StatusCode::BAD_REQUEST, "Missing 'q' parameter");
     }
 
-    let joined = texts.join("\n");
+    let joined = qs.join("\n");
     let detector = LanguageDetector::new(&[]);
     let detection = match source.as_deref() {
         Some(s) if !s.is_empty() => crate::types::DetectionResult {
@@ -415,7 +424,7 @@ async fn handle_google_translate(
     let src = normalize_language_code(&detection.language_code);
     let dst = normalize_language_code(&target);
 
-    match state.translator.translate(&texts, &src, &dst, true).await {
+    match state.translator.translate(&qs, &src, &dst, true).await {
         Ok(translated) => {
             let translations: Vec<serde_json::Value> = translated
                 .into_iter()
@@ -441,18 +450,17 @@ async fn handle_google_translate(
 }
 
 async fn google_detect_get_handler(Query(query): Query<HashMap<String, String>>) -> Response {
-    let q = query.get("q").cloned().map(serde_json::Value::String);
-    handle_google_detect(q).await
+    let qs: Vec<String> = query.get("q").into_iter().cloned().collect();
+    handle_google_detect(qs).await
 }
 
 async fn google_detect_post_handler(headers: HeaderMap, body: Bytes) -> Response {
-    let params: GoogleParams = parse_json_or_form(&headers, &body);
-    handle_google_detect(params.q).await
+    let params = parse_google_request(&headers, &body);
+    handle_google_detect(params.qs).await
 }
 
-async fn handle_google_detect(q: Option<serde_json::Value>) -> Response {
-    let texts = extract_strings(q);
-    let joined = texts.join("\n");
+async fn handle_google_detect(qs: Vec<String>) -> Response {
+    let joined = qs.join("\n");
     let detector = LanguageDetector::new(&[]);
     let detection = detector.detect(&joined).unwrap_or(crate::types::DetectionResult {
         language_code: "en".into(),
@@ -532,30 +540,123 @@ fn json_response(status: StatusCode, value: serde_json::Value) -> Response {
         .unwrap()
 }
 
-fn parse_json_or_form<T: serde::de::DeserializeOwned + Default>(
-    headers: &HeaderMap,
-    body: &[u8],
-) -> T {
+fn parse_deepl_request(headers: &HeaderMap, body: &[u8]) -> DeepLParams {
     let content_type = headers
         .get("content-type")
         .and_then(|h| h.to_str().ok())
         .unwrap_or("");
 
     if content_type.contains("application/json") {
-        if let Ok(val) = serde_json::from_slice(body) {
-            return val;
+        if let Ok(val) = serde_json::from_slice::<serde_json::Value>(body) {
+            let mut params = DeepLParams::default();
+            if let Some(target) = val.get("target_lang").and_then(|v| v.as_str()) {
+                params.target_lang = Some(target.to_string());
+            }
+            if let Some(source) = val.get("source_lang").and_then(|v| v.as_str()) {
+                params.source_lang = Some(source.to_string());
+            }
+            if let Some(auth) = val.get("auth_key").and_then(|v| v.as_str()) {
+                params.auth_key = Some(auth.to_string());
+            }
+            if let Some(t) = val.get("text") {
+                params.text = extract_strings(Some(t.clone()));
+            }
+            return params;
         }
     }
 
-    if let Ok(val) = serde_urlencoded::from_bytes(body) {
-        return val;
+    let mut params = DeepLParams::default();
+    for (k, v) in form_urlencoded::parse(body) {
+        match k.as_ref() {
+            "text" => params.text.push(v.into_owned()),
+            "target_lang" => params.target_lang = Some(v.into_owned()),
+            "source_lang" => params.source_lang = Some(v.into_owned()),
+            "auth_key" => params.auth_key = Some(v.into_owned()),
+            _ => {} // Ignore unknown fields like formality, tag_handling
+        }
+    }
+    params
+}
+
+fn parse_libre_request(headers: &HeaderMap, body: &[u8]) -> LibreParams {
+    let content_type = headers
+        .get("content-type")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+
+    if content_type.contains("application/json") {
+        if let Ok(val) = serde_json::from_slice::<serde_json::Value>(body) {
+            let mut params = LibreParams::default();
+            if let Some(target) = val.get("target").and_then(|v| v.as_str()) {
+                params.target = Some(target.to_string());
+            }
+            if let Some(source) = val.get("source").and_then(|v| v.as_str()) {
+                params.source = Some(source.to_string());
+            }
+            if let Some(api_key) = val.get("api_key").and_then(|v| v.as_str()) {
+                params.api_key = Some(api_key.to_string());
+            }
+            if let Some(format) = val.get("format").and_then(|v| v.as_str()) {
+                params.format = Some(format.to_string());
+            }
+            if let Some(q_val) = val.get("q") {
+                params.q_was_array = q_val.is_array();
+                params.q = extract_strings(Some(q_val.clone()));
+            }
+            return params;
+        }
     }
 
-    if let Ok(val) = serde_json::from_slice(body) {
-        return val;
+    let mut params = LibreParams::default();
+    for (k, v) in form_urlencoded::parse(body) {
+        match k.as_ref() {
+            "q" => params.q.push(v.into_owned()),
+            "target" => params.target = Some(v.into_owned()),
+            "source" => params.source = Some(v.into_owned()),
+            "api_key" => params.api_key = Some(v.into_owned()),
+            "format" => params.format = Some(v.into_owned()),
+            _ => {}
+        }
+    }
+    params
+}
+
+fn parse_google_request(headers: &HeaderMap, body: &[u8]) -> GoogleParams {
+    let content_type = headers
+        .get("content-type")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+
+    if content_type.contains("application/json") {
+        if let Ok(val) = serde_json::from_slice::<serde_json::Value>(body) {
+            let mut params = GoogleParams::default();
+            if let Some(target) = val.get("target").and_then(|v| v.as_str()) {
+                params.target = Some(target.to_string());
+            }
+            if let Some(source) = val.get("source").and_then(|v| v.as_str()) {
+                params.source = Some(source.to_string());
+            }
+            if let Some(key) = val.get("key").and_then(|v| v.as_str()) {
+                params.key = Some(key.to_string());
+            }
+            if let Some(q_val) = val.get("q") {
+                params.qs = extract_strings(Some(q_val.clone()));
+            }
+            return params;
+        }
     }
 
-    T::default()
+    let mut params = GoogleParams::default();
+    for (k, v) in form_urlencoded::parse(body) {
+        match k.as_ref() {
+            "q" => params.qs.push(v.into_owned()),
+            "target" => params.target = Some(v.into_owned()),
+            "source" => params.source = Some(v.into_owned()),
+            "key" => params.key = Some(v.into_owned()),
+            _ => {}
+        }
+    }
+    params
 }
 
 fn extract_strings(val: Option<serde_json::Value>) -> Vec<String> {

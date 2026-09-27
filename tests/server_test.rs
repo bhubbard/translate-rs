@@ -7,7 +7,7 @@ use translate_rs::server::{create_router, ServerState};
 async fn test_server_endpoints() {
     let state = Arc::new(ServerState {
         translator: Arc::new(AppleTranslator::new()),
-        api_key: None,
+        api_key: Some("secret-key".to_string()),
     });
     let app = create_router(state);
 
@@ -30,17 +30,19 @@ async fn test_server_endpoints() {
 
     // 2. DeepL languages
     let resp = client
-        .get(format!("http://{addr}/v2/languages"))
+        .get(format!("http://{addr}/v2/languages?type=target"))
         .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
     let json: serde_json::Value = resp.json().await.unwrap();
     assert!(json.as_array().unwrap().len() > 20);
+    assert_eq!(json[0]["language"].as_str().unwrap(), json[0]["language"].as_str().unwrap().to_uppercase());
 
-    // 3. DeepL translate JSON
+    // 3. DeepL translate JSON with Auth header
     let resp = client
         .post(format!("http://{addr}/v2/translate"))
+        .header("Authorization", "DeepL-Auth-Key secret-key")
         .json(&serde_json::json!({
             "text": ["Good morning"],
             "target_lang": "ES"
@@ -48,13 +50,40 @@ async fn test_server_endpoints() {
         .send()
         .await
         .unwrap();
-    let status = resp.status();
-    let body_text = resp.text().await.unwrap();
-    assert_eq!(status, 200, "Error body: {body_text}");
-    let json: serde_json::Value = serde_json::from_str(&body_text).unwrap();
+    assert_eq!(resp.status(), 200);
+    let json: serde_json::Value = resp.json().await.unwrap();
     assert!(json["translations"][0]["text"].as_str().is_some());
+    assert!(json["translations"][0]["billed_characters"].as_u64().is_some());
 
-    // 4. LibreTranslate languages
+    // 4. DeepL translate Form URL-encoded with multiple text values and ignored params
+    let form_body = "text=Hello&text=World&target_lang=ES&formality=more&tag_handling=xml&auth_key=secret-key";
+    let resp = client
+        .post(format!("http://{addr}/v2/translate"))
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(form_body)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let json: serde_json::Value = resp.json().await.unwrap();
+    let translations = json["translations"].as_array().unwrap();
+    assert_eq!(translations.len(), 2);
+
+    // 5. DeepL error response shape on missing target_lang
+    let resp = client
+        .post(format!("http://{addr}/v2/translate"))
+        .header("Authorization", "Bearer secret-key")
+        .json(&serde_json::json!({
+            "text": ["Hello"]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 400);
+    let json: serde_json::Value = resp.json().await.unwrap();
+    assert!(json.get("message").is_some());
+
+    // 6. LibreTranslate languages
     let resp = client
         .get(format!("http://{addr}/languages"))
         .send()
@@ -62,7 +91,7 @@ async fn test_server_endpoints() {
         .unwrap();
     assert_eq!(resp.status(), 200);
 
-    // 5. LibreTranslate detect
+    // 7. LibreTranslate detect
     let resp = client
         .post(format!("http://{addr}/detect"))
         .json(&serde_json::json!({
@@ -75,7 +104,22 @@ async fn test_server_endpoints() {
     let json: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(json[0]["language"], "fr");
 
-    // 6. Google translate v2 languages
+    // 8. LibreTranslate array q response shape
+    let resp = client
+        .post(format!("http://{addr}/translate"))
+        .json(&serde_json::json!({
+            "q": ["Hello", "World"],
+            "target": "es",
+            "api_key": "secret-key"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let json: serde_json::Value = resp.json().await.unwrap();
+    assert!(json["translatedText"].is_array());
+
+    // 9. Google translate v2 languages
     let resp = client
         .get(format!("http://{addr}/language/translate/v2/languages"))
         .send()
@@ -84,4 +128,19 @@ async fn test_server_endpoints() {
     assert_eq!(resp.status(), 200);
     let json: serde_json::Value = resp.json().await.unwrap();
     assert!(json["data"]["languages"].as_array().unwrap().len() > 20);
+
+    // 10. Google translate v2 multiple q POST
+    let resp = client
+        .post(format!("http://{addr}/language/translate/v2"))
+        .header("X-goog-api-key", "secret-key")
+        .json(&serde_json::json!({
+            "q": ["Hello", "World"],
+            "target": "es"
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let json: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(json["data"]["translations"].as_array().unwrap().len(), 2);
 }

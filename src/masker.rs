@@ -184,38 +184,91 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_backtick_masking() {
-        let text = "Translate this: `const x = 10;` but keep code intact.";
-        let segments = TranslationMasker::segments(text, false);
-        assert_eq!(segments.len(), 3);
+    fn test_protects_urls_emails_and_backticks() {
+        let segments = TranslationMasker::segments(
+            "Hallo `code` https://example.com a@b.com Welt",
+            true,
+        );
+        assert!(segments.contains(&TranslationSegment {
+            text: "`code`".into(),
+            is_translatable: false,
+        }));
+        assert!(segments.contains(&TranslationSegment {
+            text: "https://example.com".into(),
+            is_translatable: false,
+        }));
+        assert!(segments.contains(&TranslationSegment {
+            text: "a@b.com".into(),
+            is_translatable: false,
+        }));
+    }
+
+    #[test]
+    fn test_protects_fenced_code_blocks() {
+        let input = "Hallo\n```swift\nlet x = 1\n```\nWelt";
+        let segments = TranslationMasker::segments(input, true);
+        let fences: Vec<&TranslationSegment> = segments
+            .iter()
+            .filter(|s| s.text.contains("```") && !s.is_translatable)
+            .collect();
+        assert!(!fences.is_empty(), "fenced code block must be protected");
+    }
+
+    #[test]
+    fn test_protects_unterminated_backtick_run_to_end_of_input() {
+        let segments = TranslationMasker::segments("Hallo `unfinished", true);
+        let last = segments.last().unwrap();
+        assert!(!last.is_translatable);
+        assert!(last.text.starts_with('`'));
+    }
+
+    #[test]
+    fn test_preserve_newlines_splits_translatable_runs() {
+        let segments = TranslationMasker::segments("a\n\nb", true);
+        let translatables: Vec<&str> = segments
+            .iter()
+            .filter(|s| s.is_translatable)
+            .map(|s| s.text.as_str())
+            .collect();
+        let literals: String = segments
+            .iter()
+            .filter(|s| !s.is_translatable)
+            .map(|s| s.text.as_str())
+            .collect();
+        assert_eq!(translatables, vec!["a", "b"]);
+        assert_eq!(literals, "\n\n");
+    }
+
+    #[test]
+    fn test_no_preserve_newlines_keeps_contiguous() {
+        let segments = TranslationMasker::segments("a\n\nb", false);
+        assert_eq!(segments.len(), 1);
         assert!(segments[0].is_translatable);
-        assert!(!segments[1].is_translatable);
-        assert_eq!(segments[1].text, "`const x = 10;`");
-        assert!(segments[2].is_translatable);
+        assert_eq!(segments[0].text, "a\n\nb");
     }
 
     #[test]
-    fn test_url_and_email_masking() {
-        let text = "Contact support@example.com or visit https://apple.com for help.";
-        let segments = TranslationMasker::segments(text, false);
-        let non_translatable: Vec<&str> = segments
-            .iter()
-            .filter(|s| !s.is_translatable)
-            .map(|s| s.text.as_str())
-            .collect();
-        assert!(non_translatable.contains(&"support@example.com"));
-        assert!(non_translatable.contains(&"https://apple.com"));
+    fn test_round_trip_reassembly_is_lossless() {
+        let originals = [
+            "Hallo Welt",
+            "click `here` to https://example.com see a@b.com",
+            "line one\nline two\n\nparagraph two",
+            "no special tokens here at all",
+        ];
+        for original in originals {
+            let pieces: String = TranslationMasker::segments(original, true)
+                .into_iter()
+                .map(|s| s.text)
+                .collect();
+            assert_eq!(pieces, original, "masker must preserve every byte");
+        }
     }
 
     #[test]
-    fn test_preserve_newlines() {
-        let text = "Line 1\nLine 2\n\nLine 3";
-        let segments = TranslationMasker::segments(text, true);
-        let newlines: Vec<&str> = segments
-            .iter()
-            .filter(|s| !s.is_translatable)
-            .map(|s| s.text.as_str())
-            .collect();
-        assert!(newlines.contains(&"\n"));
+    fn test_empty_input_returns_empty_segment() {
+        let segments = TranslationMasker::segments("", true);
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "");
+        assert!(!segments[0].is_translatable);
     }
 }

@@ -11,6 +11,56 @@ pub enum StreamToken {
     Literal(String),
 }
 
+#[derive(Debug, Default)]
+pub struct UTF8StreamDecoder {
+    pending: Vec<u8>,
+}
+
+impl UTF8StreamDecoder {
+    pub fn new() -> Self {
+        Self {
+            pending: Vec::new(),
+        }
+    }
+
+    pub fn decode(&mut self, data: &[u8]) -> Result<String, TranslateError> {
+        self.pending.extend_from_slice(data);
+        if self.pending.is_empty() {
+            return Ok(String::new());
+        }
+
+        let max_carry = 3.min(self.pending.len());
+        for carry in 0..=max_carry {
+            let prefix_count = self.pending.len() - carry;
+            if prefix_count == 0 {
+                continue;
+            }
+            if let Ok(s) = std::str::from_utf8(&self.pending[..prefix_count]) {
+                let decoded = s.to_string();
+                self.pending.drain(..prefix_count);
+                return Ok(decoded);
+            }
+        }
+
+        if self.pending.len() <= 3 {
+            return Ok(String::new());
+        }
+
+        Err(TranslateError::Input("input is not valid UTF-8".into()))
+    }
+
+    pub fn finish(&mut self) -> Result<String, TranslateError> {
+        if self.pending.is_empty() {
+            return Ok(String::new());
+        }
+        let s = std::str::from_utf8(&self.pending)
+            .map_err(|_| TranslateError::Input("input ended with incomplete or invalid UTF-8".into()))?;
+        let res = s.to_string();
+        self.pending.clear();
+        Ok(res)
+    }
+}
+
 pub struct LineSplitter {
     buffer: String,
 }
@@ -128,13 +178,14 @@ impl StreamProcessor {
         preserve_newlines: bool,
         batch: bool,
     ) -> Result<(), TranslateError> {
+        let mut decoder = UTF8StreamDecoder::new();
         let mut first_buf = vec![0u8; self.chunk_size];
         let bytes_read = reader.read(&mut first_buf)?;
         if bytes_read == 0 {
             return Ok(());
         }
 
-        let first_chunk = String::from_utf8_lossy(&first_buf[..bytes_read]).to_string();
+        let first_chunk = decoder.decode(&first_buf[..bytes_read])?;
 
         let detection = if let Some(src) = source_override {
             DetectionResult {
@@ -172,9 +223,23 @@ impl StreamProcessor {
                 if n == 0 {
                     break;
                 }
-                let chunk = String::from_utf8_lossy(&buf[..n]);
+                let chunk = decoder.decode(&buf[..n])?;
                 self.emit(
                     splitter.feed(&chunk),
+                    &src_code,
+                    &dst_code,
+                    &detection,
+                    translator,
+                    writer,
+                    preserve_newlines,
+                )
+                .await?;
+            }
+
+            let tail = decoder.finish()?;
+            if !tail.is_empty() {
+                self.emit(
+                    splitter.feed(&tail),
                     &src_code,
                     &dst_code,
                     &detection,
@@ -214,9 +279,23 @@ impl StreamProcessor {
                 if n == 0 {
                     break;
                 }
-                let chunk = String::from_utf8_lossy(&buf[..n]);
+                let chunk = decoder.decode(&buf[..n])?;
                 self.emit(
                     splitter.feed(&chunk),
+                    &src_code,
+                    &dst_code,
+                    &detection,
+                    translator,
+                    writer,
+                    preserve_newlines,
+                )
+                .await?;
+            }
+
+            let tail = decoder.finish()?;
+            if !tail.is_empty() {
+                self.emit(
+                    splitter.feed(&tail),
                     &src_code,
                     &dst_code,
                     &detection,
