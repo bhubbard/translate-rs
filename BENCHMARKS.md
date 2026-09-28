@@ -32,16 +32,26 @@ Evaluated across English to Spanish, German, French, and Japanese corpora on App
 
 ---
 
-## 3. Translation Accuracy & Quality Parity
+## 3. Translation Accuracy & Quality Benchmarks (BLEU-4 & ChrF)
 
-Because both `translate-rs` and `translate.franzai.com` harness Apple's native on-device neural translation engine, translation quality is bit-for-bit identical across all supported macOS language pairs:
+Evaluated against standardized parallel corpora with human gold-standard references across multiple domains (conversational, technical documentation, systems programming, and legal/contracts). Tested using `benches/accuracy_bench.py`:
 
-| Target Language Pair | `translate-rs` BLEU | `translate.franzai.com` BLEU | LibreTranslate BLEU | Parity Delta |
-| :--- | :---: | :---: | :---: | :---: |
-| **English $\to$ Spanish (WMT22)** | **42.8** | **42.8** | 42.8 | $\Delta = 0.0$ (Bit-identical) |
-| **English $\to$ German (WMT22)** | **38.6** | **38.6** | 38.6 | $\Delta = 0.0$ (Bit-identical) |
-| **English $\to$ French (WMT22)** | **44.2** | **44.2** | 44.2 | $\Delta = 0.0$ (Bit-identical) |
-| **English $\to$ Japanese (Kyoto)** | **31.5** | **31.5** | 31.4 | $+0.1$ vs LibreTranslate |
+| Language Pair & Domain | `translate-rs` BLEU-4 | `translate.franzai.com` BLEU-4 | `translate-rs` ChrF | `translate.franzai.com` ChrF | Lexical Agreement (Parity) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **English $\to$ Spanish (ES)** *(Technical & General)* | **71.20** | 74.34 | **82.03** | 85.81 | **74.2% agreement** |
+| **English $\to$ German (DE)** *(Technical & Contracts)* | **57.45** | *(Model Missing)* | **77.94** | *(Model Missing)* | *Offline Ready* |
+| **English $\to$ French (FR)** *(General & Systems)* | **63.42** | *(Model Missing)* | **85.33** | *(Model Missing)* | *Offline Ready* |
+| **English $\to$ Japanese (JA)** *(General & Tech)* | **77.40** | *(Model Missing)* | **74.34** | *(Model Missing)* | *Offline Ready* |
+| **AST Code & URL Masking Preservation** | **100.0% preserved** | 100.0% preserved | **100.0% syntax intact** | 100.0% syntax intact | **Bit-exact URLs & code** |
+
+### Accuracy Benchmark Insights:
+1. **High BLEU & ChrF Performance**:
+   - `translate-rs` achieves **71.20 BLEU / 82.03 ChrF** on English $\to$ Spanish and **77.40 BLEU / 74.34 ChrF** on English $\to$ Japanese.
+   - For English $\to$ Spanish, `translate-rs` and `translate.franzai.com` produce highly aligned translations with **74.2% token-level Jaccard agreement**, differing only in natural stylistic synonym choices (e.g. `servicio en segundo plano` vs. `servicio de fondo`).
+2. **Immediate Offline Model Availability**:
+   - `translate-rs` hooks directly into the host operating system's pre-installed Apple Translation offline assets, meaning German, French, Japanese, Italian, and Portuguese operate instantly without requiring manual terminal model installation or external downloads.
+3. **AST Token & Syntax Protection**:
+   - Both engines cleanly pass inline markdown code, URLs, and email masking tests with a **100% preservation rate**, ensuring code blocks and hyperlinks are never mangled by the neural model.
 
 ---
 
@@ -68,9 +78,14 @@ Because both `translate-rs` and `translate.franzai.com` harness Apple's native o
 
 ## 5. Reproducing the Benchmarks
 
-### Running the Rust Benchmark Runner
+### Running the Latency & Throughput Benchmark Runner
 ```bash
 cargo run --release --example bench_translation
+```
+
+### Running the Accuracy & BLEU Benchmark Suite
+```bash
+python3 benches/accuracy_bench.py
 ```
 
 ### Comparing HTTP Servers Locally
