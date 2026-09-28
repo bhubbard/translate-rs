@@ -59,10 +59,22 @@ translate --serve --port 8080
 
 ---
 
-## 🧪 Testing
+## 🧪 Testing & Code Coverage
 
 ```bash
+# Run all unit, accuracy, and performance tests
 cargo test --all-targets
+
+# Run the accuracy & BLEU-4 benchmark suite
+python3 benches/accuracy_bench.py
+
+# Run the performance & latency throughput benchmark runner
+cargo run --release --example bench_translation
+
+# Generate code coverage report
+cargo llvm-cov --html --output-dir ./coverage_report
+# Or via Makefile:
+make coverage
 ```
 
 ---
