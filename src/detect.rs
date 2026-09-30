@@ -43,6 +43,7 @@ pub fn iso639_3_to_639_1(code: &str) -> &str {
     }
 }
 
+#[derive(Debug, Clone, Default)]
 pub struct LanguageDetector {
     hints: Vec<String>,
 }

@@ -16,6 +16,7 @@ static EMAIL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}"#).unwrap()
 });
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TranslationMasker;
 
 impl TranslationMasker {

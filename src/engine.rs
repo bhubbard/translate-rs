@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 #[async_trait]
-pub trait Translating: Send + Sync {
+pub trait Translating: std::fmt::Debug + Send + Sync {
     async fn prepare(
         &self,
         source: &str,
@@ -31,6 +31,7 @@ pub trait Translating: Send + Sync {
     async fn available_pairs(&self) -> Vec<String>;
 }
 
+#[derive(Debug, Clone)]
 pub struct AppleTranslator {
     bridge_path: Option<PathBuf>,
 }

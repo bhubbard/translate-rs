@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
+#[derive(Debug, Clone)]
 pub struct ServerState {
     pub translator: Arc<dyn Translating + Send + Sync>,
     pub api_key: Option<String>,
@@ -536,8 +537,8 @@ fn json_response(status: StatusCode, value: serde_json::Value) -> Response {
     Response::builder()
         .status(status)
         .header("content-type", "application/json")
-        .body(body.into())
-        .unwrap()
+        .body(body.clone().into())
+        .unwrap_or_else(|_| Response::new(body.into()))
 }
 
 fn parse_deepl_request(headers: &HeaderMap, body: &[u8]) -> DeepLParams {

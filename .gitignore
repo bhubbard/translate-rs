@@ -3,3 +3,4 @@ coverage_report
 bridge/apple_translate_bridge
 **/*.rs.bk
 .DS_Store
+target/coverage

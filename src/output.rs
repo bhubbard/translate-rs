@@ -1,6 +1,7 @@
 use crate::types::{OutputFormat, TranslationRecord};
 use std::io::{self, Write};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutputWriter {
     format: OutputFormat,
     json_started: bool,

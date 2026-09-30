@@ -61,6 +61,7 @@ impl UTF8StreamDecoder {
     }
 }
 
+#[derive(Debug, Clone, Default)]
 pub struct LineSplitter {
     buffer: String,
 }
@@ -96,6 +97,7 @@ impl LineSplitter {
     }
 }
 
+#[derive(Debug, Clone, Default)]
 pub struct ParagraphSplitter {
     buffer: String,
 }
@@ -154,6 +156,7 @@ impl ParagraphSplitter {
     }
 }
 
+#[derive(Debug, Clone, Default)]
 pub struct StreamProcessor {
     chunk_size: usize,
 }

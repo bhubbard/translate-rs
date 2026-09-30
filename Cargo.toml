@@ -1,6 +1,6 @@
 [package]
 name = "translate-rs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Brandon Hubbard <bhubbard@users.noreply.github.com>"]
 description = "Deterministic on-device translation CLI and multi-provider HTTP server in Rust (DeepL, LibreTranslate, Google v2 compatible)"
